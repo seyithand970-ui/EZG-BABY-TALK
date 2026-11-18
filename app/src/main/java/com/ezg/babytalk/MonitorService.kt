@@ -9,6 +9,8 @@ import android.content.Intent
 import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import org.json.JSONObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -30,10 +32,13 @@ class MonitorService : Service() {
     private var audioTrack: AudioTrack? = null
     private var role = "baby"
     private var room = ""
+    private val handler = Handler(Looper.getMainLooper())
+    @Volatile private var stopping = false
 
     override fun onCreate() { super.onCreate(); makeChannel() }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        stopping = false
         role = intent?.getStringExtra("role") ?: "baby"
         room = intent?.getStringExtra("room") ?: ""
         startForeground(12, makeNotification("Oda sunucusuna bağlanıyor"))
@@ -83,7 +88,9 @@ class MonitorService : Service() {
             }
             override fun onMessage(webSocket: WebSocket, text: String) { onSignal(JSONObject(text)) }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                status("Sunucuya ulaşılamadı. Sunucu kurulumu gerekiyor.")
+                status("Bağlantı kesildi; yeniden bağlanılıyor")
+                peer?.close(); peer?.dispose(); peer = null
+                handler.postDelayed({ if (!stopping) connect() }, 5000)
             }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { status("Bağlantı kapandı") }
         })
@@ -179,6 +186,8 @@ class MonitorService : Service() {
     }
 
     override fun onDestroy() {
+        stopping = true
+        handler.removeCallbacksAndMessages(null)
         ws?.close(1000,"user stopped")
         peer?.close(); peer?.dispose()
         audioTrack?.dispose(); audioSource?.dispose(); factory?.dispose()
